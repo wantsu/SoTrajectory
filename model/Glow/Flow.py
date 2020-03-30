@@ -5,13 +5,13 @@ from math import log, pi
 import numpy as np
 from scipy import linalg as la
 
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class ActNorm(nn.Module):
     def __init__(self, in_channel, logdet=True):
         super().__init__()
         # loc: b;  scale: s;
-        self.loc = nn.Parameter(torch.zeros(1, in_channel, 1))
-        self.scale = nn.Parameter(torch.ones(1, in_channel, 1))
+        self.loc = nn.Parameter(torch.zeros(1, in_channel, 1).to(device))
+        self.scale = nn.Parameter(torch.ones(1, in_channel, 1).to(device))
 
         self.register_buffer('initialized', torch.tensor(0, dtype=torch.uint8))
         self.logdet = logdet
@@ -61,7 +61,7 @@ class InvConv1d(nn.Module):
     def __init__(self, in_channel):
         super().__init__()
 
-        weight = torch.randn(in_channel, in_channel)
+        weight = torch.randn(in_channel, in_channel).to(device)
         q, _ = torch.qr(weight)  # A = QR with Q being an orthogonal matrix and R being an upper triangular matrix
         weight = q.unsqueeze(2).unsqueeze(3)  # add dim 2,3 into (C,C,1,1)
         self.weight = nn.Parameter(weight)
@@ -84,7 +84,7 @@ class InvConv1dLU(nn.Module):  # LU 1x1 Conv
     def __init__(self, in_channel):
         super().__init__()
 
-        weight = np.random.randn(in_channel, in_channel)
+        weight = np.random.randn(in_channel, in_channel).to(device)
         q, _ = la.qr(weight)  # QR decomposition
         w_p, w_l, w_u = la.lu(q.astype(np.float32))  # A = PL(U + diag(s)) decomposition
         w_s = np.diag(w_u)
@@ -137,9 +137,9 @@ class ZeroConv1d(nn.Module):
         super().__init__()
 
         self.conv = nn.Conv1d(in_channel, out_channel, 3, padding=0)  #
-        self.conv.weight.data.zero_()
-        self.conv.bias.data.zero_()
-        self.scale = nn.Parameter(torch.zeros(1, out_channel, 1))
+        self.conv.weight.data.zero_().to(device)
+        self.conv.bias.data.zero_().to(device)
+        self.scale = nn.Parameter(torch.zeros(1, out_channel, 1).to(device))
 
     def forward(self, input):
         # pad last dim (1, 1) and 2nd (1, 1), filling the value of padding with 1
