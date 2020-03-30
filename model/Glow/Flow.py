@@ -10,8 +10,8 @@ class ActNorm(nn.Module):
     def __init__(self, in_channel, logdet=True):
         super().__init__()
         # loc: b;  scale: s;
-        self.loc = nn.Parameter(torch.zeros(1, in_channel, 1, 1))
-        self.scale = nn.Parameter(torch.ones(1, in_channel, 1, 1))
+        self.loc = nn.Parameter(torch.zeros(1, in_channel, 1))
+        self.scale = nn.Parameter(torch.ones(1, in_channel, 1))
 
         self.register_buffer('initialized', torch.tensor(0, dtype=torch.uint8))
         self.logdet = logdet
@@ -19,27 +19,25 @@ class ActNorm(nn.Module):
     # zero mean and unit variance
     def initialize(self, input):
         with torch.no_grad():
-            flatten = input.permute(1, 0, 2, 3).contiguous().view(input.shape[1], -1)
+            flatten = input.permute(1, 0, 2).contiguous().view(input.shape[1], -1)
             mean = (
                 flatten.mean(1)
                 .unsqueeze(1)
                 .unsqueeze(2)
-                .unsqueeze(3)
-                .permute(1, 0, 2, 3)
+                .permute(1, 0, 2)
             )
             std = (
                 flatten.std(1)
                 .unsqueeze(1)
                 .unsqueeze(2)
-                .unsqueeze(3)
-                .permute(1, 0, 2, 3)
+                .permute(1, 0, 2)
             )
 
             self.loc.data.copy_(-mean)
             self.scale.data.copy_(1 / (std + 1e-6))
 
     def forward(self, input):
-        _, _, height, width = input.shape
+        _, _, length = input.shape
         # initialization
         if self.initialized.item() == 0:
             self.initialize(input)
@@ -47,7 +45,7 @@ class ActNorm(nn.Module):
         # Log_det = h * w * sum(log|s|)
         log_abs = torch.log(torch.abs(self.scale))
 
-        logdet = height * width * torch.sum(log_abs)
+        logdet = length * torch.sum(log_abs)
 
         if self.logdet:
             return self.scale * input + self.loc, logdet  # s * (x + b)
@@ -59,7 +57,7 @@ class ActNorm(nn.Module):
         return (output - self.loc) / self.scale   # y/s - b
 
 # regular 1x1 Conv
-class InvConv2d(nn.Module):
+class InvConv1d(nn.Module):
     def __init__(self, in_channel):
         super().__init__()
 
@@ -69,20 +67,20 @@ class InvConv2d(nn.Module):
         self.weight = nn.Parameter(weight)
 
     def forward(self, input):
-        _, _, height, width = input.shape
+        _, _, length = input.shape
 
-        out = F.conv2d(input, self.weight)  # y = Wx
+        out = F.conv1d(input, self.weight)  # y = Wx
         logdet = (  # h * w * log|det(W)|
-            height * width * torch.slogdet(self.weight.squeeze().double())[1].float()
+            length * torch.slogdet(self.weight.squeeze().double())[1].float()
         )
 
         return out, logdet
 
     def reverse(self, output):  # W^{-1}
-        return F.conv2d(output, self.weight.squeeze().inverse().unsqueeze(2).unsqueeze(3))
+        return F.conv1d(output, self.weight.squeeze().inverse().unsqueeze(2).unsqueeze(3))
 
 
-class InvConv2dLU(nn.Module):  # LU 1x1 Conv
+class InvConv1dLU(nn.Module):  # LU 1x1 Conv
     def __init__(self, in_channel):
         super().__init__()
 
@@ -109,12 +107,12 @@ class InvConv2dLU(nn.Module):  # LU 1x1 Conv
         self.w_u = nn.Parameter(w_u)
 
     def forward(self, input):
-        _, _, height, width = input.shape
+        _, _, length = input.shape
 
         weight = self.calc_weight()
 
-        out = F.conv2d(input, weight)  # y = Wx
-        logdet = height * width * torch.sum(self.w_s)  # h * w * sum(log|s|)
+        out = F.conv1d(input, weight)  # y = Wx
+        logdet = length * torch.sum(self.w_s)  # h * w * sum(log|s|)
 
         return out, logdet
 
@@ -125,33 +123,15 @@ class InvConv2dLU(nn.Module):  # LU 1x1 Conv
             @ ((self.w_u * self.u_mask) + torch.diag(self.s_sign * torch.exp(self.w_s)))
         )
 
-        return weight.unsqueeze(2).unsqueeze(3)
+        return weight.unsqueeze(2)
 
     def reverse(self, output):
         weight = self.calc_weight()
 
-        return F.conv2d(output, weight.squeeze().inverse().unsqueeze(2).unsqueeze(3))
+        return F.conv1d(output, weight.squeeze().inverse().unsqueeze(2))
 
 
 # Zero Initialization: zero the last conv of NN()
-# class ZeroConv2d(nn.Module):
-#     def __init__(self, in_channel, out_channel, padding=1):
-#         super().__init__()
-#
-#         self.conv = nn.Conv2d(in_channel, out_channel, 3, padding=0)  #
-#         self.conv.weight.data.zero_()
-#         self.conv.bias.data.zero_()
-#         self.scale = nn.Parameter(torch.zeros(1, out_channel, 1, 1))
-#
-#     def forward(self, input):
-#         # pad last dim (1, 1) and 2nd (1, 1), filling the value of padding with 1
-#         out = F.pad(input, [1, 1, 1, 1], value=1)
-#         out = self.conv(out)
-#         out = out * torch.exp(self.scale * 3)
-#
-#         return out
-
-
 class ZeroConv1d(nn.Module):
     def __init__(self, in_channel, out_channel, padding=1):
         super().__init__()
@@ -227,32 +207,31 @@ class Flow(nn.Module):
     def __init__(self, in_channel, affine=True, conv_lu=True):
         super().__init__()
 
-        # self.actnorm = ActNorm(in_channel)
+        self.actnorm = ActNorm(in_channel)
 
-        # if conv_lu:
-        #     self.invconv = InvConv2dLU(in_channel)
-        #
-        # else:
-        #     self.invconv = InvConv2d(in_channel)
+        if conv_lu:
+            self.invconv = InvConv1dLU(in_channel)
+
+        else:
+            self.invconv = InvConv1d(in_channel)
 
         self.coupling = AffineCoupling(in_channel, affine=affine)
 
     def forward(self, input):
-        # out, logdet = self.actnorm(input)
-        # out, det1 = self.invconv(out)
-        # out, det2 = self.coupling(out)
+        out, logdet = self.actnorm(input)
+        out, det1 = self.invconv(out)
+        out, det2 = self.coupling(out)
+        #
+        logdet = logdet + det1
+        if det2 is not None:
+            logdet = logdet + det2
 
-        # logdet = logdet + det1
-        # if det2 is not None:
-        #     logdet = logdet + det2
-        out, logdet = self.coupling(input)
         return out, logdet
 
     def reverse(self, output):
-        # input = self.coupling.reverse(output)
-        # input = self.invconv.reverse(input)
-        # input = self.actnorm.reverse(input)
         input = self.coupling.reverse(output)
+        input = self.invconv.reverse(input)
+        input = self.actnorm.reverse(input)
         return input
 
 
@@ -348,18 +327,19 @@ class Block(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, in_channel, n_flow, n_block, affine=True, conv_lu=True):
+    def __init__(self, in_channel, length, n_flow, n_block, affine=True, conv_lu=True):
         super().__init__()
         self.blocks = nn.ModuleList()
         self.mlps = nn.ModuleList()
         n_channel = in_channel
         for i in range(n_block - 1):
             self.blocks.append(Block(n_channel, n_flow, affine=affine, conv_lu=conv_lu))
-            self.mlps.append(torch.nn.Linear(n_channel*2, n_channel*2))
-            n_channel *= 2
+            length //=2
+            self.mlps.append(torch.nn.Linear(length, length))
+            n_channel *= 1
 
         self.blocks.append(Block(n_channel, n_flow, split=False, affine=affine))
-        self.mlps.append(torch.nn.Linear(n_channel*2, n_channel*2))
+        self.mlps.append(torch.nn.Linear(length // 2, length // 2))
 
     def forward(self, input, reverse=False):
         log_p_sum = 0
@@ -394,4 +374,3 @@ class Model(nn.Module):
 
         pred_traj = self.reverse(outs, reconstruct=True)
         return pred_traj
-

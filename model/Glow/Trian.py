@@ -132,14 +132,14 @@ def main(args):
 
     # Model
     model = Model(
-        flow_config.in_channel, flow_config.n_flow, flow_config.n_block, affine=flow_config.affine, conv_lu=not flow_config.no_lu
+        flow_config.in_channel, flow_config.feature_size, flow_config.n_flow, flow_config.n_block, affine=flow_config.affine, conv_lu=not flow_config.no_lu
     )
     model = model.to(args.device)
     model.train()
     logger.info('Here is the Flow:')
     logger.info(model)
     optimizer = optim.Adam(model.parameters(), lr=flow_config.lr)
-    pbar = tqdm(range(args.num_iterations))
+    pbar = tqdm(range(args.num_epochs))
     n_bins = 2. ** flow_config.n_bits
     loss = []
     for i in pbar:

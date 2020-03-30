@@ -78,7 +78,7 @@ def Gan_params():
     Gan_config.add_argument('--g_steps', default=1, type=int)
 
     # Discriminator Options
-    Gan_config.add_argument('--d_type', default='local', type=str)
+    Gan_config.add_argumnum_iterationsent('--d_type', default='local', type=str)
     Gan_config.add_argument('--encoder_h_dim_d', default=64, type=int)
     Gan_config.add_argument('--d_learning_rate', default=5e-4, type=float)
     Gan_config.add_argument('--d_steps', default=2, type=int)
@@ -112,9 +112,10 @@ def Flow_params():
 
     #Model Options
     flow_config.add_argument(
-        '--n_flow', default=2, type=int, help='number of flows in each block'
+        '--n_flow', default=8, type=int, help='number of flows in each block'
     )
     flow_config.add_argument('--n_block', default=1, type=int, help='number of blocks')
+    flow_config.add_argument('--feature_size', default=8, type=int, help='image size')
     flow_config.add_argument(
         '--no_lu',
         action='store_true',

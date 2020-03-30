@@ -5,6 +5,7 @@ import math
 import torch
 from torch.utils.data import Dataset
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class TrajectoryDataset(Dataset):
     """Dataloder for the Trajectory datasets"""
@@ -94,15 +95,15 @@ class TrajectoryDataset(Dataset):
 
         # Convert numpy -> Torch Tensor
         self.obs_traj = torch.from_numpy(
-            seq_list[:, :, :self.obs_len]).type(torch.float)
+            seq_list[:, :, :self.obs_len]).type(torch.float).to(device)
         self.pred_traj_gt = torch.from_numpy(
-            seq_list[:, :, self.obs_len:]).type(torch.float)
+            seq_list[:, :, self.obs_len:]).type(torch.float).to(device)
         self.obs_traj_rel = torch.from_numpy(
-            seq_list_rel[:, :, :self.obs_len]).type(torch.float)
+            seq_list_rel[:, :, :self.obs_len]).type(torch.float).to(device)
         self.pred_traj_rel = torch.from_numpy(
-            seq_list_rel[:, :, self.obs_len:]).type(torch.float)
-        self.loss_mask = torch.from_numpy(loss_mask_list).type(torch.float)
-        self.non_linear_ped = torch.from_numpy(non_linear_ped).type(torch.float)
+            seq_list_rel[:, :, self.obs_len:]).type(torch.float).to(device)
+        self.loss_mask = torch.from_numpy(loss_mask_list).type(torch.float).to(device)
+        self.non_linear_ped = torch.from_numpy(non_linear_ped).type(torch.float).to(device)
         cum_start_idx = [0] + np.cumsum(num_peds_in_seq).tolist()
         self.seq_start_end = [
             (start, end)
