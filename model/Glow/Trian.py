@@ -33,10 +33,10 @@ def check_accuracy(args, loader, model, limit=False):
              non_linear_ped, loss_mask, seq_start_end) = batch
             linear_ped = 1 - non_linear_ped
             loss_mask = loss_mask[:, args.obs_len:]
-            input = obs_traj.permute(1, 2, 0)
+            input = obs_traj_rel.permute(1, 2, 0)
             _, _, z_outs = model.forward(input)
-            pred_traj = model.decoder(z_outs)
-            pred_traj = pred_traj.permute(2, 0, 1)
+            pred_traj_rel = model.decoder(z_outs).permute(2, 0, 1)
+            pred_traj = relative_to_abs(pred_traj_rel, obs_traj[-1])
             ade, ade_l, ade_nl = cal_ade(pred_traj_gt, pred_traj, linear_ped, non_linear_ped)
             fde, fde_l, fde_nl = cal_fde(pred_traj_gt, pred_traj, linear_ped, non_linear_ped)
 
@@ -143,15 +143,16 @@ def main(args):
     pbar = tqdm(range(args.num_epochs))
     n_bins = 2. ** flow_config.n_bits
     loss = []
+    iteration = 0
     for i in pbar:
         for batch in train_loader:
             batch = [tensor for tensor in batch]
             (obs_traj, pred_traj, obs_traj_rel, pred_traj_rel,
              non_linear_ped, loss_mask, seq_start_end) = batch
-
+            iteration += 1
             # Computing cost
-            input = obs_traj.permute(1, 2, 0)
-            pred_traj_gt = pred_traj.permute(1, 2, 0)
+            input = obs_traj_rel.permute(1, 2, 0)
+            pred_traj_gt_rel = pred_traj_rel.permute(1, 2, 0)
             if i == 0:
                 with torch.no_grad():
                     log_p, logdet, z_outs = model(input + torch.rand_like(input) / n_bins)
@@ -166,12 +167,13 @@ def main(args):
             cost, log_p, log_det = calc_loss(log_p, logdet, n_bins)
             print('flow_loss: ', cost.item())
             # reconstruction loss
-            pred_traj = model.decoder(z_outs)
-            bceLoss = F.binary_cross_entropy(torch.sigmoid(pred_traj), torch.sigmoid(pred_traj_gt), reduction='sum')
+            pred_traj_rel = model.decoder(z_outs)
+            bceLoss = F.binary_cross_entropy(torch.sigmoid(pred_traj_rel), torch.sigmoid(pred_traj_gt_rel), reduction='sum')
             cost += bceLoss
             model.zero_grad()
             cost.backward()
-            warmup_lr = flow_config.lr * min(1, i * args.batch_size / (args.num_iterations * 10))
+            #warmup_lr = flow_config.lr * min(1, i * args.batch_size / (args.num_iterations * 10))
+            warmup_lr = flow_config.lr
             optimizer.param_groups[0]['lr'] = warmup_lr
             optimizer.step()
 
@@ -179,23 +181,23 @@ def main(args):
                 f'Loss: {cost.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}'
             )
             loss.append(cost.item())
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
-            # Check stats on the validation set
-            logger.info('\n Checking stats on val ...')
-            metrics_val = check_accuracy(args, val_loader, model, limit=True)
+            if iteration % args.checkpoint_every:
+                # Check stats on the validation set
+                logger.info('\n Checking stats on val ...')
+                metrics_val = check_accuracy(args, val_loader, model, limit=True)
 
-            logger.info('Checking stats on train ...')
-            metrics_train = check_accuracy(args, train_loader, model, limit=True)
+                logger.info('Checking stats on train ...')
+                metrics_train = check_accuracy(args, train_loader, model, limit=True)
 
-            for k, v in sorted(metrics_train.items()):
-                logger.info('  [train] {}: {:.3f}'.format(k, v))
+                for k, v in sorted(metrics_train.items()):
+                    logger.info('  [train] {}: {:.3f}'.format(k, v))
 
-            for k, v in sorted(metrics_val.items()):
-                logger.info('  [val] {}: {:.3f}'.format(k, v))
+                for k, v in sorted(metrics_val.items()):
+                    logger.info('  [val] {}: {:.3f}'.format(k, v))
 
-            i += 1
-            if i >= args.num_iterations:
-                break
+        i += 1
+        if i >= args.num_iterations:
+            break
 
     plt.plot([i for i in range(len(loss))], loss)
     plt.show()

@@ -22,7 +22,7 @@ def parameters():
 
     # Optimization
     parser.add_argument('--batch_size', default=32, type=int)
-    parser.add_argument('--num_iterations', default=20, type=int)
+    parser.add_argument('--num_iterations', default=20000, type=int)
     parser.add_argument('--num_epochs', default=200, type=int)
 
 
@@ -49,7 +49,7 @@ def parameters():
     # Output
     parser.add_argument('--output_dir', default=os.getcwd())
     parser.add_argument('--print_every', default=5, type=int)
-    parser.add_argument('--checkpoint_every', default=100, type=int)
+    parser.add_argument('--checkpoint_every', default=25, type=int)
     parser.add_argument('--checkpoint_name', default='checkpoint')
     parser.add_argument('--checkpoint_start_from', default=None)
     parser.add_argument('--restore_from_checkpoint', default=1, type=int)
