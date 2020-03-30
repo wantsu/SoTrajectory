@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from configs.Params import parameters, Flow_params
 from model.Loss import cal_fde, cal_ade
 from utils.utils import relative_to_abs
+import matplotlib.pyplot as plt
 import logging
 import sys
 import torch
@@ -195,6 +196,9 @@ def main(args):
             i += 1
             if i >= args.num_iterations:
                 break
+
+    plt.plot([i for i in range(len(loss))], loss)
+    plt.show()
 
     return model
 
