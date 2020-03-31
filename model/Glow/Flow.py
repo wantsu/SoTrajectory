@@ -84,7 +84,7 @@ class InvConv1dLU(nn.Module):  # LU 1x1 Conv
     def __init__(self, in_channel):
         super().__init__()
 
-        weight = np.random.randn(in_channel, in_channel).to(device)
+        weight = np.random.randn(in_channel, in_channel)
         q, _ = la.qr(weight)  # QR decomposition
         w_p, w_l, w_u = la.lu(q.astype(np.float32))  # A = PL(U + diag(s)) decomposition
         w_s = np.diag(w_u)

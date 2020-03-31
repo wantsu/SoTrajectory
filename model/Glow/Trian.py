@@ -168,8 +168,9 @@ def main(args):
             print('flow_loss: ', cost.item())
             # reconstruction loss
             pred_traj_rel = model.decoder(z_outs)
-            bceLoss = F.binary_cross_entropy(torch.sigmoid(pred_traj_rel), torch.sigmoid(pred_traj_gt_rel), reduction='sum')
-            cost += bceLoss
+            mseLoss = F.mse_loss(pred_traj_rel, pred_traj_gt_rel, reduction='sum')
+            #bceLoss = F.binary_cross_entropy(torch.sigmoid(pred_traj_rel), torch.sigmoid(pred_traj_gt_rel), reduction='sum')
+            cost += mseLoss
             model.zero_grad()
             cost.backward()
             #warmup_lr = flow_config.lr * min(1, i * args.batch_size / (args.num_iterations * 10))
