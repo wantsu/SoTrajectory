@@ -1,4 +1,6 @@
 import torch
+from model.Loss import cal_fde, cal_ade
+
 
 def relative_to_abs(rel_traj, start_pos):
     """

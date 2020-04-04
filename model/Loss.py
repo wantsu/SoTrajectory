@@ -2,6 +2,7 @@ import torch
 import random
 import torch.nn.functional as F
 
+
 def bce_loss(input, target):
     """
     Numerically stable version of the binary cross-entropy loss function.

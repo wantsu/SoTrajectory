@@ -3,7 +3,6 @@ import torch.nn.functional as F
 from model.Model_utils import Extractor
 from model.Feature_decoder import Decoder
 from model.Loss import cvae_loss
-
 class CVAE(torch.nn.Module):
 
     def __init__(self, obs_len, pred_len, embedding_dim=64, encoder_h_dim=64, decoder_h_dim=128,

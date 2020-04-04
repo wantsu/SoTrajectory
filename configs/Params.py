@@ -112,7 +112,7 @@ def Flow_params():
 
     #Model Options
     flow_config.add_argument(
-        '--n_flow', default=8, type=int, help='number of flows in each block'
+        '--n_flow', default=32, type=int, help='number of flows in each block'
     )
     flow_config.add_argument('--n_block', default=1, type=int, help='number of blocks')
     flow_config.add_argument('--feature_size', default=8, type=int, help='image size')

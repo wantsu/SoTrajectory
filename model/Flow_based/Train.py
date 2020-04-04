@@ -1,21 +1,33 @@
 from tqdm import tqdm
-from math import log
-import torch.nn.functional as F
-from configs.Params import parameters, Flow_params
-from model.Loss import cal_fde, cal_ade, bce_loss
-from utils.utils import relative_to_abs
+from configs.Params import parameters
 import matplotlib.pyplot as plt
+from model.Loss import cal_fde, cal_ade, bce_loss
+from math import log
 import logging
 import sys
 import torch
 from torch import nn, optim
 from utils.data import get_dset_path
 from data.dataloader import data_loader
-from model.Glow.Flow import Model
+from model.Flow_based.flow_based import Flow_based
 
 FORMAT = '[%(levelname)s: %(filename)s: %(lineno)4d]: %(message)s'
 logging.basicConfig(level=logging.INFO, format=FORMAT, stream=sys.stdout)
 logger = logging.getLogger(__name__)
+
+
+def calc_loss(log_p, logdet, n_bins):
+    # log_p = calc_log_p([z_list])
+    n_pixel = 2 * 8 * 1 # channel * height * weight
+
+    loss = -log(n_bins) * n_pixel
+    loss = loss + logdet + log_p
+
+    return (
+        (-loss / (log(2) * n_pixel)).mean(),
+        (log_p / (log(2) * n_pixel)).mean(),
+        (logdet / (log(2) * n_pixel)).mean(),
+    )
 
 def check_accuracy(args, loader, model, limit=False):
 
@@ -32,12 +44,11 @@ def check_accuracy(args, loader, model, limit=False):
              non_linear_ped, loss_mask, seq_start_end) = batch
             linear_ped = 1 - non_linear_ped
             loss_mask = loss_mask[:, args.obs_len:]
-            input = obs_traj_rel.permute(1, 2, 0)
-            _, _, z_outs = model.forward(input)
-            pred_traj_rel = model.decoder(z_outs).permute(2, 0, 1)
-            pred_traj = relative_to_abs(pred_traj_rel, obs_traj[-1])
-            ade, ade_l, ade_nl = cal_ade(pred_traj_gt, pred_traj, linear_ped, non_linear_ped)
-            fde, fde_l, fde_nl = cal_fde(pred_traj_gt, pred_traj, linear_ped, non_linear_ped)
+            input = obs_traj_rel
+            _, _, pred = model.forward(input)
+            #pred_traj = relative_to_abs(pred_traj_rel, obs_traj[-1])
+            ade, ade_l, ade_nl = cal_ade(pred_traj_gt, pred.permute(2, 0, 1), linear_ped, non_linear_ped)
+            fde, fde_l, fde_nl = cal_fde(pred_traj_gt, pred.permute(2, 0, 1), linear_ped, non_linear_ped)
 
             disp_error.append(ade.item())
             disp_error_l.append(ade_l.item())
@@ -73,112 +84,43 @@ def check_accuracy(args, loader, model, limit=False):
     return metrics
 
 
-# def sample_data(batch_size, image_size):
-#
-#     dataset = datasets.MNIST('~/Tutorial/data', transform=transforms.ToTensor())
-#     loader = DataLoader(dataset, shuffle=True, batch_size=batch_size)
-#     loader = iter(loader)
-#
-#     while True:
-#         try:
-#             yield next(loader)
-#
-#         except StopIteration:
-#             loader = DataLoader(
-#                 dataset, shuffle=True, batch_size=batch_size
-#             )
-#             loader = iter(loader)
-#             yield next(loader)
-
-
-# def calc_z_shapes(n_channel, length, n_flow, n_block):
-#     z_shapes = []
-#
-#     for i in range(n_block - 1):
-#         length //= 2
-#         n_channel *= 2
-#
-#         z_shapes.append((n_channel, length, length))
-#
-#     length //= 2
-#     z_shapes.append((n_channel * 4, length, length))
-#
-#     return z_shapes
-
-
-def calc_loss(log_p, logdet, n_bins):
-    # log_p = calc_log_p([z_list])
-    n_pixel = 2 * 8 * 1 # channel * height * weight
-
-    loss = -log(n_bins) * n_pixel
-    loss = loss + logdet + log_p
-
-    return (
-        (-loss / (log(2) * n_pixel)).mean(),
-        (log_p / (log(2) * n_pixel)).mean(),
-        (logdet / (log(2) * n_pixel)).mean(),
-    )
-
-
 def main(args):
     train_path = get_dset_path(args.dataset_name, 'train')
     val_path = get_dset_path(args.dataset_name, 'val')
+
     logger.info("Initializing train dataset")
     train_loader = data_loader(args, train_path)
     logger.info("Initializing val dataset")
     val_loader = data_loader(args, val_path)
-    # load model parameters
-    flow_config = Flow_params()
-
-    # Model
-    model = Model(
-        flow_config.in_channel, flow_config.feature_size, flow_config.n_flow, flow_config.n_block, affine=flow_config.affine, conv_lu=not flow_config.no_lu
-    )
+    # load parameters
+    model = Flow_based(in_channel=2, length=8, n_flow=8, n_block=1)
     model = model.to(args.device)
     model.train()
-    logger.info('Here is the Flow:')
+    logger.info('Here is the Model:')
     logger.info(model)
-    optimizer = optim.Adam(model.parameters(), lr=flow_config.lr)
-    pbar = tqdm(range(args.num_epochs))
-    n_bins = 2. ** flow_config.n_bits
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
+    n_bins = 2. ** 5
     loss = []
     iteration = 0
-    for i in pbar:
+    pbar = tqdm(range(args.num_iterations))
+    for t in pbar:
         for batch in train_loader:
+            iteration += 1
             batch = [tensor for tensor in batch]
             (obs_traj, pred_traj, obs_traj_rel, pred_traj_rel,
              non_linear_ped, loss_mask, seq_start_end) = batch
-            iteration += 1
-            # Computing cost
-            input = obs_traj_rel.permute(1, 2, 0)
-            pred_traj_gt_rel = pred_traj_rel.permute(1, 2, 0)
-            if i == 0:
-                with torch.no_grad():
-                    log_p, logdet, z_outs = model(input + torch.rand_like(input) / n_bins)
-
-                    continue
-
-            else:
-                log_p, logdet, z_outs = model(input + torch.rand_like(input) / n_bins)
-
+            log_p, logdet, pred = model(obs_traj)
             logdet = logdet.mean()
-
             cost, log_p, log_det = calc_loss(log_p, logdet, n_bins)
-
-            # reconstruction loss
-            pred_traj_rel = model.decoder(z_outs)
-            mseLoss = F.mse_loss(pred_traj_rel, pred_traj_gt_rel, reduction='sum')
-            #bceLoss = F.bce_loss(pred_traj_rel, pred_traj_gt_rel, reduction='sum')
-            cost += mseLoss
-            model.zero_grad()
+            bceLoss = bce_loss(pred.permute(2, 0, 1), pred_traj)
+            cost += bceLoss
+            optimizer.zero_grad()
             cost.backward()
-            #warmup_lr = flow_config.lr * min(1, i * args.batch_size / (args.num_iterations * 10))
-            warmup_lr = flow_config.lr
-            optimizer.param_groups[0]['lr'] = warmup_lr
             optimizer.step()
-
+            loss.append(cost.item())
+            print('flow_loss: ', cost.item())
             pbar.set_description(
-                f'Loss: {cost.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f}; lr: {warmup_lr:.7f}'
+                f'Loss: {cost.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f};'
             )
             loss.append(cost.item())
             if iteration % args.checkpoint_every:
@@ -195,14 +137,6 @@ def main(args):
                 for k, v in sorted(metrics_val.items()):
                     logger.info('  [val] {}: {:.3f}'.format(k, v))
 
-        i += 1
-        if i >= args.num_iterations:
-            break
-
-    plt.plot([i for i in range(len(loss))], loss)
-    plt.show()
-
-    return model
 
 
 if __name__ == '__main__':
@@ -210,4 +144,4 @@ if __name__ == '__main__':
     args = parameters()
     args.device = device
     model = main(args)
-    torch.save(model.state_dict(), "flow_model")
+    #torch.save(model.state_dict(), "flowbased_model")

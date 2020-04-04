@@ -7,12 +7,13 @@ import sys
 from tqdm import tqdm
 import torch
 import torch.optim as optim
-from utils.utils import relative_to_abs
+from utils.utils import check_accuracy
 from model.VAE.VAE import CVAE
 
 FORMAT = '[%(levelname)s: %(filename)s: %(lineno)4d]: %(message)s'
 logging.basicConfig(level=logging.INFO, format=FORMAT, stream=sys.stdout)
 logger = logging.getLogger(__name__)
+
 
 def main(args):
 
@@ -80,61 +81,6 @@ def main(args):
                 break
 
     return model
-
-
-def check_accuracy(args, loader, cvae, limit=False):
-
-    metrics = {}
-    disp_error, disp_error_l, disp_error_nl = [], [], []
-    f_disp_error, f_disp_error_l, f_disp_error_nl = [], [], []
-    total_traj, total_traj_l, total_traj_nl = 0, 0, 0
-    loss_mask_sum = 0
-    cvae.eval()
-    with torch.no_grad():
-        for batch in loader:
-            batch = [tensor for tensor in batch]
-            (obs_traj, pred_traj_gt, obs_traj_rel, pred_traj_gt_rel,
-             non_linear_ped, loss_mask, seq_start_end) = batch
-            linear_ped = 1 - non_linear_ped
-            loss_mask = loss_mask[:, args.obs_len:]
-
-            pred_traj_rel = cvae.inference(obs_traj, obs_traj_rel, seq_start_end)
-            pred_traj = relative_to_abs(pred_traj_rel, obs_traj[-1])
-            ade, ade_l, ade_nl = cal_ade(pred_traj_gt, pred_traj, linear_ped, non_linear_ped)
-            fde, fde_l, fde_nl = cal_fde(pred_traj_gt, pred_traj, linear_ped, non_linear_ped)
-
-            disp_error.append(ade.item())
-            disp_error_l.append(ade_l.item())
-            disp_error_nl.append(ade_nl.item())
-            f_disp_error.append(fde.item())
-            f_disp_error_l.append(fde_l.item())
-            f_disp_error_nl.append(fde_nl.item())
-
-            loss_mask_sum += torch.numel(loss_mask.data)
-            total_traj += pred_traj_gt.size(1)
-            total_traj_l += torch.sum(linear_ped).item()
-            total_traj_nl += torch.sum(non_linear_ped).item()
-            if limit and total_traj >= args.num_samples_check:
-                break
-
-    metrics['ade'] = sum(disp_error) / (total_traj * args.pred_len)
-    metrics['fde'] = sum(f_disp_error) / total_traj
-    if total_traj_l != 0:
-        metrics['ade_l'] = sum(disp_error_l) / (total_traj_l * args.pred_len)
-        metrics['fde_l'] = sum(f_disp_error_l) / total_traj_l
-    else:
-        metrics['ade_l'] = 0
-        metrics['fde_l'] = 0
-    if total_traj_nl != 0:
-        metrics['ade_nl'] = sum(disp_error_nl) / (
-                total_traj_nl * args.pred_len)
-        metrics['fde_nl'] = sum(f_disp_error_nl) / total_traj_nl
-    else:
-        metrics['ade_nl'] = 0
-        metrics['fde_nl'] = 0
-
-    cvae.train()
-    return metrics
 
 
 if __name__ == '__main__':
