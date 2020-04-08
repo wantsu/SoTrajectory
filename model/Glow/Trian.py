@@ -164,7 +164,7 @@ def main(args):
             logdet = logdet.mean()
 
             cost, log_p, log_det = calc_loss(log_p, logdet, n_bins)
-
+            print('nll:', cost.item)
             # reconstruction loss
             pred_traj_rel = model.decoder(z_outs)
             mseLoss = F.mse_loss(pred_traj_rel, pred_traj_gt_rel, reduction='sum')

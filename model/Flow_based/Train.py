@@ -1,7 +1,9 @@
 from tqdm import tqdm
 from configs.Params import parameters
 import matplotlib.pyplot as plt
-from model.Loss import cal_fde, cal_ade, bce_loss
+from utils.utils import relative_to_abs
+from torch.nn import functional as F
+from model.Loss import cal_fde, cal_ade
 from math import log
 import logging
 import sys
@@ -45,10 +47,10 @@ def check_accuracy(args, loader, model, limit=False):
             linear_ped = 1 - non_linear_ped
             loss_mask = loss_mask[:, args.obs_len:]
             input = obs_traj_rel
-            _, _, pred = model.forward(input)
-            #pred_traj = relative_to_abs(pred_traj_rel, obs_traj[-1])
-            ade, ade_l, ade_nl = cal_ade(pred_traj_gt, pred.permute(2, 0, 1), linear_ped, non_linear_ped)
-            fde, fde_l, fde_nl = cal_fde(pred_traj_gt, pred.permute(2, 0, 1), linear_ped, non_linear_ped)
+            pred = model.inference(input)
+            pred = relative_to_abs(pred.permute(2, 0, 1), obs_traj[-1])
+            ade, ade_l, ade_nl = cal_ade(pred_traj_gt, pred, linear_ped, non_linear_ped)
+            fde, fde_l, fde_nl = cal_fde(pred_traj_gt, pred, linear_ped, non_linear_ped)
 
             disp_error.append(ade.item())
             disp_error_l.append(ade_l.item())
@@ -102,27 +104,37 @@ def main(args):
     n_bins = 2. ** 5
     loss = []
     iteration = 0
-    pbar = tqdm(range(args.num_iterations))
-    for t in pbar:
+    pbar = tqdm(range(args.num_epochs))
+    for i in pbar:
         for batch in train_loader:
             iteration += 1
             batch = [tensor for tensor in batch]
             (obs_traj, pred_traj, obs_traj_rel, pred_traj_rel,
              non_linear_ped, loss_mask, seq_start_end) = batch
-            log_p, logdet, pred = model(obs_traj)
+
+            if i == 0:
+                with torch.no_grad():
+                    log_p, logdet, pred = model(obs_traj_rel, pred_traj_rel)
+
+                    continue
+
+            else:
+                log_p, logdet, pred = model(obs_traj_rel, pred_traj_rel)
+
             logdet = logdet.mean()
             cost, log_p, log_det = calc_loss(log_p, logdet, n_bins)
-            bceLoss = bce_loss(pred.permute(2, 0, 1), pred_traj)
-            cost += bceLoss
+            mseLoss = F.mse_loss(pred.permute(2, 0, 1), pred_traj_rel)
+            print('flow_loss: ', cost.item())
+            cost += mseLoss
             optimizer.zero_grad()
             cost.backward()
             optimizer.step()
             loss.append(cost.item())
-            print('flow_loss: ', cost.item())
             pbar.set_description(
                 f'Loss: {cost.item():.5f}; logP: {log_p.item():.5f}; logdet: {log_det.item():.5f};'
             )
             loss.append(cost.item())
+
             if iteration % args.checkpoint_every:
                 # Check stats on the validation set
                 logger.info('\n Checking stats on val ...')
@@ -137,6 +149,14 @@ def main(args):
                 for k, v in sorted(metrics_val.items()):
                     logger.info('  [val] {}: {:.3f}'.format(k, v))
 
+        i += 1
+        if i >= args.num_iterations:
+            break
+
+    plt.plot([i for i in range(len(loss))], loss)
+    plt.show()
+
+    return model
 
 
 if __name__ == '__main__':
