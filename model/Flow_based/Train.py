@@ -46,9 +46,8 @@ def check_accuracy(args, loader, model, limit=False):
              non_linear_ped, loss_mask, seq_start_end) = batch
             linear_ped = 1 - non_linear_ped
             loss_mask = loss_mask[:, args.obs_len:]
-            input = obs_traj_rel
-            pred = model.inference(input)
-            pred = relative_to_abs(pred.permute(2, 0, 1), obs_traj[-1])
+            pred = model.inference(obs_traj, obs_traj_rel)
+            pred = relative_to_abs(pred, obs_traj[-1])
             ade, ade_l, ade_nl = cal_ade(pred_traj_gt, pred, linear_ped, non_linear_ped)
             fde, fde_l, fde_nl = cal_fde(pred_traj_gt, pred, linear_ped, non_linear_ped)
 
@@ -95,7 +94,7 @@ def main(args):
     logger.info("Initializing val dataset")
     val_loader = data_loader(args, val_path)
     # load parameters
-    model = Flow_based(in_channel=2, length=8, n_flow=8, n_block=1)
+    model = Flow_based(in_channel=2, length=8, n_flow=4, n_block=1)
     model = model.to(args.device)
     model.train()
     logger.info('Here is the Model:')
@@ -114,16 +113,16 @@ def main(args):
 
             if i == 0:
                 with torch.no_grad():
-                    log_p, logdet, pred = model(obs_traj_rel, pred_traj_rel)
+                    log_p, logdet, pred = model(obs_traj, obs_traj_rel, pred_traj_rel)
 
                     continue
 
             else:
-                log_p, logdet, pred = model(obs_traj_rel, pred_traj_rel)
+                log_p, logdet, pred = model(obs_traj, obs_traj_rel, pred_traj_rel)
 
             logdet = logdet.mean()
             cost, log_p, log_det = calc_loss(log_p, logdet, n_bins)
-            mseLoss = F.mse_loss(pred.permute(2, 0, 1), pred_traj_rel)
+            mseLoss = F.mse_loss(pred, pred_traj_rel, reduction='sum')
             print('flow_loss: ', cost.item())
             cost += mseLoss
             optimizer.zero_grad()
