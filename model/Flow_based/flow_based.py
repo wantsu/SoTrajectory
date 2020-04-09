@@ -8,15 +8,14 @@ class Flow_based(torch.nn.Module):
 
     def __init__(self, encoder_h_dim=64, decoder_h_dim=128,
                  mlp_dim=1024, num_layers=1, dropout=0, in_channel=2, length=8, n_flow=8, n_block=1):
-
         super(Flow_based, self).__init__()
         self.z_shapes = self.calc_z_shapes(int(in_channel/(2**n_block)), encoder_h_dim, n_block)
         # Encoder: an RNN encoder to extract data into hidden state
-        self.F1 = nn.Linear(2, encoder_h_dim)
+        #self.F1 = nn.Linear(2, encoder_h_dim)
         self.encoder = nn.LSTM(
-            encoder_h_dim, encoder_h_dim, num_layers, dropout=dropout
+            in_channel, encoder_h_dim, num_layers, dropout=dropout
         )
-        self.Flow = Model(int(in_channel/(2**(n_block))), encoder_h_dim, n_flow, n_block, affine=True, conv_lu=True)
+        self.Flow = Model(int(in_channel / (2**(n_block))), encoder_h_dim, n_flow, n_block, affine=True, conv_lu=True)
         # Decoder: produce prediction paths
         self.decoder = nn.LSTM(
             int(encoder_h_dim / (2**(n_block-1))), decoder_h_dim, num_layers, dropout=dropout
@@ -65,16 +64,9 @@ class Flow_based(torch.nn.Module):
 
         return z_shapes
 
-    def squeese(self, input):
-        b_size, n_channel, length = input.shape
-        squeezed = input.view(b_size, n_channel, length // 2, 2)
-        squeezed = squeezed.permute(0, 1, 3, 2)
-        out = squeezed.contiguous().view(b_size, n_channel * 2, length // 2)
-        return out
-
     def Encoder(self, input):
-        embedding = self.F1(input)
-        output, state = self.encoder(embedding)
+        #embedding = self.F1(input)
+        output, state = self.encoder(input)
         hidden = state[0]
         return hidden
 
