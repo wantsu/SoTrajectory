@@ -342,6 +342,10 @@ class Model(nn.Module):
         self.mlps.append(torch.nn.Linear(length // 2, length // 2))
 
     def forward(self, input, reverse=False):
+
+        if reverse:
+            return self.reverse(input)
+
         log_p_sum = 0
         logdet = 0
         out = input
@@ -354,6 +358,7 @@ class Model(nn.Module):
                 log_p_sum = log_p_sum + log_p
 
         return log_p_sum, logdet, z_outs
+
 
     def reverse(self, z_list, reconstruct=False):
         for i, block in enumerate(self.blocks[::-1]):

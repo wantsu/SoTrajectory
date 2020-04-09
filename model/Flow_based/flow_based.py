@@ -27,20 +27,19 @@ class Flow_based(torch.nn.Module):
         n_bins = 2. ** 5
         hidden_x = self.Encoder(obs_traj)  # extract features
         hidden_y = self.Encoder(pred_traj)
+        hidden_x = hidden_x.permute(1, 0, 2)
         input = hidden_y.permute(1, 0, 2)
-        log_p_sum, logdet, z_outs = self.Flow(input + torch.rand_like(input) / n_bins, reverse='False') # obtain latent of pred trajectory
-        z = torch.cat(z_outs, dim=1)  # concat latents into single tensor
-        hidden_x = self.squeese(hidden_x.permute(1, 0, 2))
-        c = torch.cat((hidden_x, z), dim=2)
+        log_p_sum, logdet, z_outs = self.Flow(input + torch.rand_like(input) / n_bins, reverse=False) # obtain latent of pred trajectory
+        recon_y = self.Flow(z_outs, reverse=True)
+        c = torch.cat((hidden_x, recon_y), dim=1)
         out = self.Decoder(c)              # decode latent into pred traj
         return log_p_sum, logdet, out
 
     def inference(self, obs_traj):
-        hidden_x = self.Encoder(obs_traj)
-        hidden_x = self.squeese(hidden_x.permute(1, 0, 2))
-        z= self.sample(hidden_x.shape[0], self.z_shapes) # sampling from normal gaussian
-        z = torch.cat(z, dim=1)
-        c = torch.cat((hidden_x, z), dim=2)
+        hidden_x = self.Encoder(obs_traj).permute(1, 0, 2)
+        z_lists= self.sample(hidden_x.shape[0], self.z_shapes) # sampling from normal gaussian
+        recon_y = self.Flow(z_lists, reverse='True')
+        c = torch.cat((hidden_x, recon_y), dim=1)
         out = self.Decoder(c)
         return out
 
