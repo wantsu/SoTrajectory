@@ -10,42 +10,39 @@ class Flow_based(torch.nn.Module):
                  mlp_dim=1024, num_layers=1, dropout=0, in_channel=2, length=8, n_flow=8, n_block=1):
 
         super(Flow_based, self).__init__()
-        self.z_shapes = self.calc_z_shapes(int(in_channel/2), encoder_h_dim, n_block)
+        self.z_shapes = self.calc_z_shapes(int(in_channel/(2**n_block)), encoder_h_dim, n_block)
         # Encoder: an RNN encoder to extract data into hidden state
+        self.F1 = nn.Linear(2, encoder_h_dim)
         self.encoder = nn.LSTM(
-            in_channel, encoder_h_dim, num_layers, dropout=dropout
+            encoder_h_dim, encoder_h_dim, num_layers, dropout=dropout
         )
-        self.Flow = Model(int(in_channel/(2**n_block)), encoder_h_dim, n_flow, n_block, affine=True, conv_lu=True)
-
+        self.Flow = Model(int(in_channel/(2**(n_block))), encoder_h_dim, n_flow, n_block, affine=True, conv_lu=True)
         # Decoder: produce prediction paths
-        self.decoder = self.decoder = nn.LSTM(
-            int(encoder_h_dim / (2**(n_block-1))), length, num_layers, dropout=dropout
+        self.decoder = nn.LSTM(
+            int(encoder_h_dim / (2**(n_block-1))), decoder_h_dim, num_layers, dropout=dropout
         )
+        self.F2 = nn.Linear(decoder_h_dim, length)
 
     def forward(self, obs_traj, pred_traj):
         n_bins = 2. ** 5
-        output, state = self.encoder(obs_traj)  # extract features
-        hidden_x = state[0]
-        output, state = self.encoder(pred_traj)
-        hidden_y = state[0]
+        hidden_x = self.Encoder(obs_traj)  # extract features
+        hidden_y = self.Encoder(pred_traj)
         input = hidden_y.permute(1, 0, 2)
         log_p_sum, logdet, z_outs = self.Flow(input + torch.rand_like(input) / n_bins, reverse='False') # obtain latent of pred trajectory
         z = torch.cat(z_outs, dim=1)  # concat latents into single tensor
         hidden_x = self.squeese(hidden_x.permute(1, 0, 2))
         c = torch.cat((hidden_x, z), dim=2)
-        output, state_tuple = self.decoder(c)  # decode latent into pred traj
-        return log_p_sum, logdet, output
+        out = self.Decoder(c)              # decode latent into pred traj
+        return log_p_sum, logdet, out
 
     def inference(self, obs_traj):
-        output, state = self.encoder(obs_traj)
-        hidden_x = state[0]
+        hidden_x = self.Encoder(obs_traj)
         hidden_x = self.squeese(hidden_x.permute(1, 0, 2))
         z= self.sample(hidden_x.shape[0], self.z_shapes) # sampling from normal gaussian
         z = torch.cat(z, dim=1)
         c = torch.cat((hidden_x, z), dim=2)
-        output, _ = self.decoder(c)
-       # pred = self.mlp(output)
-        return output
+        out = self.Decoder(c)
+        return out
 
     def sample(self, batch, z_shapes):
         z_sample = []
@@ -75,3 +72,14 @@ class Flow_based(torch.nn.Module):
         squeezed = squeezed.permute(0, 1, 3, 2)
         out = squeezed.contiguous().view(b_size, n_channel * 2, length // 2)
         return out
+
+    def Encoder(self, input):
+        embedding = self.F1(input)
+        output, state = self.encoder(embedding)
+        hidden = state[0]
+        return hidden
+
+    def Decoder(self, input):
+        output, state = self.decoder(input)
+        output = self.F2(output)
+        return output
