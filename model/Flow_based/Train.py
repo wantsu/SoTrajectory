@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def calc_loss(log_p, logdet, n_bins):
     # log_p = calc_log_p([z_list])
-    n_pixel = 2 * 8 * 1 # channel * height * weight
+    n_pixel = 2 * 64 * 1 # channel * encoder_dim * weight
 
     loss = -log(n_bins) * n_pixel
     loss = loss + logdet + log_p

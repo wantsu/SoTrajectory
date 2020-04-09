@@ -19,9 +19,8 @@ class Flow_based(torch.nn.Module):
 
         # Decoder: produce prediction paths
         self.decoder = self.decoder = nn.LSTM(
-            int(encoder_h_dim / (2**(n_block-1))), decoder_h_dim, num_layers, dropout=dropout
+            int(encoder_h_dim / (2**(n_block-1))), length, num_layers, dropout=dropout
         )
-        self.mlp = nn.Linear(decoder_h_dim, length)
 
     def forward(self, obs_traj, pred_traj):
         n_bins = 2. ** 5
@@ -30,14 +29,12 @@ class Flow_based(torch.nn.Module):
         output, state = self.encoder(pred_traj)
         hidden_y = state[0]
         input = hidden_y.permute(1, 0, 2)
-        input = input + torch.rand_like(input) / n_bins
-        log_p_sum, logdet, z_outs = self.Flow(input, reverse='False') # obtain latent of pred trajectory
+        log_p_sum, logdet, z_outs = self.Flow(input + torch.rand_like(input) / n_bins, reverse='False') # obtain latent of pred trajectory
         z = torch.cat(z_outs, dim=1)  # concat latents into single tensor
         hidden_x = self.squeese(hidden_x.permute(1, 0, 2))
         c = torch.cat((hidden_x, z), dim=2)
         output, state_tuple = self.decoder(c)  # decode latent into pred traj
-        pred = self.mlp(output)
-        return log_p_sum, logdet, pred
+        return log_p_sum, logdet, output
 
     def inference(self, obs_traj):
         output, state = self.encoder(obs_traj)
@@ -47,8 +44,8 @@ class Flow_based(torch.nn.Module):
         z = torch.cat(z, dim=1)
         c = torch.cat((hidden_x, z), dim=2)
         output, _ = self.decoder(c)
-        pred = self.mlp(output)
-        return pred
+       # pred = self.mlp(output)
+        return output
 
     def sample(self, batch, z_shapes):
         z_sample = []
