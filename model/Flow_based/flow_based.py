@@ -1,49 +1,78 @@
 import torch
-from model.Feature_encoder import Encoder
+from model.Feature_decoder import Decoder
+from model.Model_utils import Extractor, make_mlp
 from model.Glow.Flow import Model
-import torch.nn as nn
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Flow_based(torch.nn.Module):
 
-    def __init__(self, encoder_h_dim=64, decoder_h_dim=128, embedding_dim=64, h_dim=128,
-                 num_layers=1, dropout=0, in_channel=2, length=8, n_flow=8, n_block=1):
+    def __init__(self, encoder_h_dim=64, decoder_h_dim=128, embedding_dim=64, h_dim=128, mlp_dim=1024,
+                 num_layers=1, dropout=0, length=8, in_channel=2, n_flow=8, n_block=1, bottleneck_dim=1024,
+                 activation='relu', batch_norm=True, pooling=True, pooling_type='pool_net', pool_every_timestep=True,
+                 neighborhood_size=2.0, grid_size=8):
         super(Flow_based, self).__init__()
         self.seq_len = length
         self.encoder_h_dim = encoder_h_dim
-        self.num_layers = 1
+        self.num_layers = num_layers
         self.decoder_h_dim = decoder_h_dim
         self.embedding_dim = embedding_dim
         self.h_dim = h_dim
-        self.z_shapes = self.calc_z_shapes(int(in_channel/(2**n_block)), encoder_h_dim, n_block)
-        # Encoder: an RNN encoder to extract data into hidden state
-        self.encoder = Encoder()
-        self.Flow = Model(int(in_channel / (2**(n_block))), encoder_h_dim, n_flow, n_block, affine=True, conv_lu=True)
+        self.pooling = pooling
+        self.z_shapes = self.calc_z_shapes(1, encoder_h_dim, n_block)
+        # Extractor: an RNN encoder to extract data into hidden state
+        self.extractor = Extractor(pooling, embedding_dim, encoder_h_dim,
+                                   mlp_dim, bottleneck_dim, activation, batch_norm)
+        if pooling:
+            self.z_shapes = self.calc_z_shapes(1, encoder_h_dim+bottleneck_dim, n_block)
+            self.Flow = Model(1, encoder_h_dim+bottleneck_dim, n_flow, n_block, affine=True, conv_lu=True)
+            mlp_decoder_context_dims = [
+                (encoder_h_dim+bottleneck_dim)*2, mlp_dim, decoder_h_dim
+            ]
+            self.mlp = make_mlp(
+                mlp_decoder_context_dims,
+                activation=activation,
+                batch_norm=batch_norm,
+                dropout=dropout
+            )
+        else:
+            self.Flow = Model(1, encoder_h_dim, n_flow, n_block, affine=True, conv_lu=True)
 
-        self.decoder = nn.LSTM(
-            embedding_dim, h_dim, num_layers, dropout=dropout
+        # Decoder: produce prediction paths
+        self.decoder = Decoder(
+            self.seq_len,
+            embedding_dim=embedding_dim,
+            h_dim=decoder_h_dim,
+            mlp_dim=mlp_dim,
+            num_layers=num_layers,
+            pool_every_timestep=pool_every_timestep,
+            dropout=dropout,
+            bottleneck_dim=bottleneck_dim,
+            activation=activation,
+            batch_norm=batch_norm,
+            pooling_type=pooling_type,
+            grid_size=grid_size,
+            neighborhood_size=neighborhood_size
         )
-        self.spatial_embedding = nn.Linear(2, embedding_dim)
-        self.hidden2pos = nn.Linear(h_dim, 2)
 
-    def forward(self, obs_traj, obs_traj_rel, pred_traj_rel):
+    def forward(self, obs_traj, obs_traj_rel, pred_traj, pred_traj_rel, seq_start_end):
         n_bins = 2. ** 5
-        hidden_x = self.encoder(obs_traj_rel)  # extract features
-        hidden_y = self.encoder(pred_traj_rel)
+        hidden_x = self.extractor(obs_traj, obs_traj_rel, seq_start_end).unsqueeze(0)
+        hidden_y = self.extractor(pred_traj, pred_traj_rel, seq_start_end).unsqueeze(0)
         hidden_x = hidden_x.permute(1, 0, 2)
         input = hidden_y.permute(1, 0, 2)
         log_p_sum, logdet, z_outs = self.Flow(input + torch.rand_like(input) / n_bins, reverse=False) # obtain latent of pred trajectory
         recon_y = self.Flow(z_outs, reverse=True)
-        hidden_x = hidden_x.view(-1, self.encoder_h_dim)
-        hidden_y = recon_y.view(-1, self.encoder_h_dim)
+        hidden_x, hidden_y = torch.squeeze(hidden_x, 1), torch.squeeze(recon_y, 1)
         c = torch.cat((hidden_x, hidden_y), dim=1)
-        out = self.Decoder(c, obs_traj, obs_traj_rel)              # decode latent into pred traj
+        out = self.Decoder(c, obs_traj, obs_traj_rel, seq_start_end)              # decode latent into pred traj
         return log_p_sum, logdet, out
 
-    def inference(self, obs_traj, obs_traj_rel):
+    def inference(self, obs_traj, obs_traj_rel, seq_start_end):
+        #hidden_x = self.extractor(obs_traj, obs_traj_rel, seq_start_end).unsqueeze(0)
         hidden_x = self.encoder(obs_traj_rel)
         z_lists= self.sample(hidden_x.shape[1], self.z_shapes) # sampling from normal gaussian
         recon_y = self.Flow(z_lists, reverse=True)
+        #hidden_x, hidden_y = torch.squeeze(hidden_x, 1), torch.squeeze(recon_y, 1)
         hidden_x = hidden_x.view(-1, self.encoder_h_dim)
         hidden_y = recon_y.view(-1, self.encoder_h_dim)
         c = torch.cat((hidden_x, hidden_y), dim=1)
@@ -72,7 +101,10 @@ class Flow_based(torch.nn.Module):
 
         return z_shapes
 
-    def Decoder(self, input, obs_traj, obs_traj_rel):
+    def Decoder(self, input, obs_traj, obs_traj_rel, seq_start_end):
+        if self.pooling:
+            input = self.mlp(input)
+
         decoder_h = torch.unsqueeze(input, 0)
         batch = obs_traj.size(1)
         decoder_c = torch.zeros(
@@ -82,23 +114,12 @@ class Flow_based(torch.nn.Module):
         last_pos = obs_traj[-1]
         last_pos_rel = obs_traj_rel[-1]
 
-        pred_traj = []  # prediction trajectory
-        batch = last_pos.size(0)
-        decoder_input = self.spatial_embedding(last_pos_rel)
-        decoder_input = decoder_input.view(1, batch, self.embedding_dim)
-
-        for _ in range(self.seq_len):
-            output, state_tuple = self.decoder(decoder_input, state_tuple)
-            rel_pos = self.hidden2pos(output.view(-1, self.h_dim))
-            curr_pos = rel_pos + last_pos
-
-            embedding_input = rel_pos
-
-            decoder_input = self.spatial_embedding(embedding_input)
-            decoder_input = decoder_input.view(1, batch, self.embedding_dim)
-            pred_traj.append(rel_pos.view(batch, -1))
-            last_pos = curr_pos
-
-        pred_traj = torch.stack(pred_traj, dim=0)
-
-        return pred_traj
+        # Predict Trajectory
+        decoder_out = self.decoder(
+            last_pos,
+            last_pos_rel,
+            state_tuple,
+            seq_start_end,
+        )
+        traj_pred, final_decoder_h = decoder_out
+        return traj_pred
