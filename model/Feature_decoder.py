@@ -9,7 +9,7 @@ class Decoder(nn.Module):
         self, seq_len, embedding_dim=64, h_dim=128, mlp_dim=1024, num_layers=1,
         pool_every_timestep=True, dropout=0.0, bottleneck_dim=1024,
         activation='relu', batch_norm=True, pooling_type='pool_net',
-        neighborhood_size=2.0, grid_size=8
+        neighborhood_size=2.0, grid_size=8, cell='LSTM'
     ):
         super(Decoder, self).__init__()
 
@@ -18,10 +18,15 @@ class Decoder(nn.Module):
         self.h_dim = h_dim
         self.embedding_dim = embedding_dim
         self.pool_every_timestep = pool_every_timestep
-
-        self.decoder = nn.LSTM(
-            embedding_dim, h_dim, num_layers, dropout=dropout
-        )
+        self.cell = cell
+        if self.cell == 'LSTM':
+            self.decoder = nn.LSTM(
+                embedding_dim, h_dim, num_layers, dropout=dropout
+            )
+        else:
+            self.decoder = nn.GRU(
+                embedding_dim, h_dim, num_layers, dropout=dropout
+            )
 
         if pool_every_timestep:
             if pooling_type == 'pool_net':
@@ -69,20 +74,27 @@ class Decoder(nn.Module):
         batch = last_pos.size(0)
         decoder_input = self.spatial_embedding(last_pos_rel)
         decoder_input = decoder_input.view(1, batch, self.embedding_dim)
-
+        if self.cell == 'GRU':
+            state_tuple = state_tuple[0]
         for _ in range(self.seq_len):
             output, state_tuple = self.decoder(decoder_input, state_tuple)
             rel_pos = self.hidden2pos(output.view(-1, self.h_dim))
             curr_pos = rel_pos + last_pos
 
-            if self.pool_every_timestep:
-                decoder_h = state_tuple[0]
-                pool_h = self.pool_net(decoder_h, seq_start_end, curr_pos)
-                decoder_h = torch.cat(
-                    [decoder_h.view(-1, self.h_dim), pool_h], dim=1)
-                decoder_h = self.mlp(decoder_h)
-                decoder_h = torch.unsqueeze(decoder_h, 0)
-                state_tuple = (decoder_h, state_tuple[1])
+            # if self.pool_every_timestep:
+            #     if self.cell == 'GRU':
+            #         decoder_h = state_tuple
+            #     else:
+            #         decoder_h = state_tuple[0]
+            #     pool_h = self.pool_net(decoder_h, seq_start_end, curr_pos)
+            #     decoder_h = torch.cat(
+            #         [decoder_h.view(-1, self.h_dim), pool_h], dim=1)
+            #     decoder_h = self.mlp(decoder_h)
+            #     decoder_h = torch.unsqueeze(decoder_h, 0)
+            #     if self.cell == 'GRU':
+            #         state_tuple = (decoder_h, 0)
+            #     else:
+            #         state_tuple = (decoder_h, state_tuple[1])
 
             embedding_input = rel_pos
 

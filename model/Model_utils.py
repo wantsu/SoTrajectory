@@ -223,9 +223,9 @@ class SocialPooling(nn.Module):
 class Extractor(nn.Module):
 
     def __init__(self, pooling=True, embedding_dim=64, encoder_h_dim=64,
-                 mlp_dim=1024, bottleneck_dim=1024, activation='relu', batch_norm=True):
+                 mlp_dim=1024, bottleneck_dim=1024, activation='relu', batch_norm=True, cell='LSTM'):
         super(Extractor, self).__init__()
-        self.encoder = Encoder()
+        self.encoder = Encoder(cell=cell)
         self.pooling = pooling
         self.encoder_h_dim = encoder_h_dim
 

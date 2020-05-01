@@ -9,7 +9,7 @@ class Flow_based(torch.nn.Module):
     def __init__(self, encoder_h_dim=64, decoder_h_dim=128, embedding_dim=64, h_dim=128, mlp_dim=1024,
                  num_layers=1, dropout=0, length=8, in_channel=2, n_flow=8, n_block=1, bottleneck_dim=1024,
                  activation='relu', batch_norm=True, pooling=True, pooling_type='pool_net', pool_every_timestep=True,
-                 neighborhood_size=2.0, grid_size=8):
+                 neighborhood_size=2.0, grid_size=8, cell='LSTM'):
         super(Flow_based, self).__init__()
         self.seq_len = length
         self.encoder_h_dim = encoder_h_dim
@@ -21,7 +21,7 @@ class Flow_based(torch.nn.Module):
         self.z_shapes = self.calc_z_shapes(1, encoder_h_dim, n_block)
         # Extractor: an RNN encoder to extract data into hidden state
         self.extractor = Extractor(pooling, embedding_dim, encoder_h_dim,
-                                   mlp_dim, bottleneck_dim, activation, batch_norm)
+                                   mlp_dim, bottleneck_dim, activation, batch_norm, cell)
         if pooling:
             self.z_shapes = self.calc_z_shapes(1, encoder_h_dim+bottleneck_dim, n_block)
             self.Flow = Model(1, encoder_h_dim+bottleneck_dim, n_flow, n_block, affine=True, conv_lu=True)
@@ -51,7 +51,8 @@ class Flow_based(torch.nn.Module):
             batch_norm=batch_norm,
             pooling_type=pooling_type,
             grid_size=grid_size,
-            neighborhood_size=neighborhood_size
+            neighborhood_size=neighborhood_size,
+            cell=cell
         )
 
     def forward(self, obs_traj, obs_traj_rel, pred_traj, pred_traj_rel, seq_start_end):

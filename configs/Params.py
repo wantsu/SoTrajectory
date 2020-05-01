@@ -23,14 +23,16 @@ def parameters():
     # Optimization
     parser.add_argument('--batch_size', default=32, type=int)
     parser.add_argument('--num_iterations', default=20000, type=int)
-    parser.add_argument('--num_epochs', default=200, type=int)
+    parser.add_argument('--num_epochs', default=400, type=int)
 
 
     # Model
     parser.add_argument('--Gan_config', type=str, default='configs/Gan.config')
+    parser.add_argument('--cell', type=str, default='GRU')
+
 
     # Pooling Options
-    parser.add_argument('--pooling', default=True, type=bool)
+    parser.add_argument('--pooling', default=False, type=bool)
     parser.add_argument('--pooling_type', default='pool_net')
     parser.add_argument('--pool_every_timestep', default=1, type=bool)
 

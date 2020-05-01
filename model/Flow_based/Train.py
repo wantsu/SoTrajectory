@@ -3,7 +3,7 @@ from configs.Params import parameters
 import matplotlib.pyplot as plt
 from utils.utils import relative_to_abs
 from torch.nn import functional as F
-from model.Loss import cal_fde, cal_ade
+from model.Loss import cal_fde, cal_ade, bce_loss
 from math import log
 import logging
 import sys
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def calc_loss(log_p, logdet, n_bins):
     # log_p = calc_log_p([z_list])
-    n_pixel = 2 * 64 * 1 # channel * encoder_dim * weight
+    n_pixel = 1 * 64 # channel * encoder_dim
 
     loss = -log(n_bins) * n_pixel
     loss = loss + logdet + log_p
@@ -86,15 +86,16 @@ def check_accuracy(args, loader, model, limit=False):
 
 
 def main(args):
-    train_path = get_dset_path(args.dataset_name, 'train')
-    val_path = get_dset_path(args.dataset_name, 'val')
-
+    # train_path = get_dset_path(args.dataset_name, 'train')
+    # val_path = get_dset_path(args.dataset_name, 'val')
+    train_path = '/home/want/Project/SoTrajectory/toy/toydata/train'
+    val_path = '/home/want/Project/SoTrajectory/toy/toydata/val'
     logger.info("Initializing train dataset")
     train_loader = data_loader(args, train_path)
     logger.info("Initializing val dataset")
     val_loader = data_loader(args, val_path)
     # load parameters
-    model = Flow_based(in_channel=2, length=8, n_flow=4, n_block=1)
+    model = Flow_based(length=8, n_flow=8, n_block=1, pooling=args.pooling, cell=args.cell)
     model = model.to(args.device)
     model.train()
     logger.info('Here is the Model:')
@@ -113,16 +114,16 @@ def main(args):
 
             if i == 0:
                 with torch.no_grad():
-                    log_p, logdet, pred = model(obs_traj, obs_traj_rel, pred_traj_rel)
+                    log_p, logdet, pred = model(obs_traj, obs_traj_rel, pred_traj, pred_traj_rel, seq_start_end)
 
                     continue
 
             else:
-                log_p, logdet, pred = model(obs_traj, obs_traj_rel, pred_traj_rel)
+                log_p, logdet, pred = model(obs_traj, obs_traj_rel, pred_traj, pred_traj_rel, seq_start_end)
 
             logdet = logdet.mean()
             cost, log_p, log_det = calc_loss(log_p, logdet, n_bins)
-            mseLoss = F.mse_loss(pred, pred_traj_rel, reduction='sum')
+            mseLoss = bce_loss(pred, pred_traj_rel)
             print('flow_loss: ', cost.item())
             cost += mseLoss
             optimizer.zero_grad()
@@ -134,7 +135,7 @@ def main(args):
             )
             loss.append(cost.item())
 
-            if iteration % args.checkpoint_every:
+            if iteration % args.checkpoint_every == 0:
                 # Check stats on the validation set
                 logger.info('\n Checking stats on val ...')
                 metrics_val = check_accuracy(args, val_loader, model, limit=True)
@@ -163,4 +164,4 @@ if __name__ == '__main__':
     args = parameters()
     args.device = device
     model = main(args)
-    #torch.save(model.state_dict(), "flowbased_model")
+    #torch.save(model.state_dict(), "toy_flow_based_model")
