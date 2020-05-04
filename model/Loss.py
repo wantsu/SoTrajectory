@@ -47,7 +47,7 @@ def gan_d_loss(scores_real, scores_fake):
     y_fake = torch.zeros_like(scores_fake) * random.uniform(0, 0.3)
     loss_real = bce_loss(scores_real, y_real)
     loss_fake = bce_loss(scores_fake, y_fake)
-    return loss_real + loss_fake
+    return (loss_real + loss_fake) / 2
 
 
 def l2_loss(pred_traj, pred_traj_gt, loss_mask, random=0, mode='average'):
