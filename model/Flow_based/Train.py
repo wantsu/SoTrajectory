@@ -3,9 +3,10 @@ from configs.Params import parameters
 import matplotlib.pyplot as plt
 from utils.utils import relative_to_abs
 from torch.nn import functional as F
-from model.Loss import cal_fde, cal_ade, bce_loss
+from model.Loss import cal_fde, cal_ade
 from math import log
 import logging
+import warnings
 import sys
 import torch
 from torch import nn, optim
@@ -16,7 +17,7 @@ from model.Flow_based.flow_based import Flow_based
 FORMAT = '[%(levelname)s: %(filename)s: %(lineno)4d]: %(message)s'
 logging.basicConfig(level=logging.INFO, format=FORMAT, stream=sys.stdout)
 logger = logging.getLogger(__name__)
-
+warnings.filterwarnings('ignore')
 
 def calc_loss(log_p, logdet, n_bins):
     # log_p = calc_log_p([z_list])
@@ -46,7 +47,7 @@ def check_accuracy(args, loader, model, limit=False):
              non_linear_ped, loss_mask, seq_start_end) = batch
             linear_ped = 1 - non_linear_ped
             loss_mask = loss_mask[:, args.obs_len:]
-            pred = model.inference(obs_traj, obs_traj_rel)
+            pred = model.inference(obs_traj, obs_traj_rel, seq_start_end)
             pred = relative_to_abs(pred, obs_traj[-1])
             ade, ade_l, ade_nl = cal_ade(pred_traj_gt, pred, linear_ped, non_linear_ped)
             fde, fde_l, fde_nl = cal_fde(pred_traj_gt, pred, linear_ped, non_linear_ped)
@@ -86,22 +87,22 @@ def check_accuracy(args, loader, model, limit=False):
 
 
 def main(args):
-    # train_path = get_dset_path(args.dataset_name, 'train')
-    # val_path = get_dset_path(args.dataset_name, 'val')
-    train_path = '/home/want/Project/SoTrajectory/toy/toydata/train'
-    val_path = '/home/want/Project/SoTrajectory/toy/toydata/val'
+    train_path = get_dset_path(args.dataset_name, 'train')
+    val_path = get_dset_path(args.dataset_name, 'val')
+    # train_path = '/home/want/Project/SoTrajectory/toy/toydata/train'
+    # val_path = '/home/want/Project/SoTrajectory/toy/toydata/val'
     logger.info("Initializing train dataset")
     train_loader = data_loader(args, train_path)
     logger.info("Initializing val dataset")
     val_loader = data_loader(args, val_path)
     # load parameters
-    model = Flow_based(length=8, n_flow=8, n_block=1, pooling=args.pooling, cell=args.cell)
+    model = Flow_based(length=8, n_flow=4, n_block=1, pooling=args.pooling, cell=args.cell)
     model = model.to(args.device)
     model.train()
     logger.info('Here is the Model:')
     logger.info(model)
     optimizer = optim.Adam(model.parameters(), lr=0.0001)
-    n_bins = 2. ** 5
+    n_bins = 2. ** 6
     loss = []
     iteration = 0
     pbar = tqdm(range(args.num_epochs))
@@ -114,16 +115,15 @@ def main(args):
 
             if i == 0:
                 with torch.no_grad():
-                    log_p, logdet, pred = model(obs_traj, obs_traj_rel, pred_traj, pred_traj_rel, seq_start_end)
+                    log_p, logdet, pred, mseLoss = model(obs_traj, obs_traj_rel, pred_traj, pred_traj_rel, seq_start_end)
 
                     continue
 
             else:
-                log_p, logdet, pred = model(obs_traj, obs_traj_rel, pred_traj, pred_traj_rel, seq_start_end)
+                log_p, logdet, pred, mseLoss = model(obs_traj, obs_traj_rel, pred_traj, pred_traj_rel, seq_start_end)
 
             logdet = logdet.mean()
             cost, log_p, log_det = calc_loss(log_p, logdet, n_bins)
-            mseLoss = bce_loss(pred, pred_traj_rel)
             print('flow_loss: ', cost.item())
             cost += mseLoss
             optimizer.zero_grad()

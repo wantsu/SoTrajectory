@@ -240,11 +240,11 @@ class Extractor(nn.Module):
                 batch_norm=batch_norm
             )
 
-    def forward(self, obs_traj, obs_traj_rel, seq_start_end, user_noise=None):
+    def forward(self, obs_traj, obs_traj_rel, seq_start_end, user_noise=None, pooling=False):
         # Encoding sequence
         final_encoder_h = self.encoder(obs_traj_rel)
 
-        if self.pooling:  # Pooling
+        if pooling:  # Pooling
             end_pos = obs_traj[-1, :, :]
             pool_h = self.pool_net(final_encoder_h, seq_start_end, end_pos)
             # Construct input hidden states for decoder

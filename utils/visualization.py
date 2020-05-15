@@ -26,7 +26,7 @@ def _animation(peds_num, traj_len, obs_len, traj_gt_x, traj_gt_y, traj_pred_x, t
     x_start_end = [min([min(x) for x in traj_gt_x]), max([max(x) for x in traj_gt_x])]
     y_start_end = [min([min(y) for y in traj_gt_y]), max([max(x) for x in traj_gt_y])]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, figsize=(10, 10))
+    fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True)
     ax1.set_title('Ground truth')
     ax2.set_title('Prediction')
     plt.xlim(x_start_end)
@@ -35,12 +35,12 @@ def _animation(peds_num, traj_len, obs_len, traj_gt_x, traj_gt_y, traj_pred_x, t
     for t in range(traj_len):
         im = []
         for i in range(peds_num):
-            im.append(ax1.scatter(traj_gt_x[i][:t], traj_gt_y[i][:t] ))
-            im.append(ax2.scatter(traj_pred_x[i][:t], traj_pred_y[i][:t]))
+            im.append(ax1.scatter(traj_gt_x[i][:t], traj_gt_y[i][:t], c='g'))
+            im.append(ax1.scatter(traj_pred_x[i][:t], traj_pred_y[i][:t], c='r'))
         ims.append(im)
 
     ani = animation.ArtistAnimation(fig, ims, interval=500)
-    ani.save(time.strftime('Img/'+'%Y-%m-%d %H:%M:%S'.format(time.localtime(time.time()))+'.Gif' ))
+    #ani.save(time.strftime('Img/'+'%Y-%m-%d %H:%M:%S'.format(time.localtime(time.time()))+'.Gif' ))
     plt.show()
 
     # To save the animation, use e.g.
